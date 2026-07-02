@@ -2,15 +2,17 @@ import numpy as np
 import open3d as o3d
 import config
 
-def compute_empty_volume(empty_pcd):
+def compute_single_volume(pcd):
     """
-    Computes the Bed Capacity (total empty-truck bed volume) purely from an empty scan.
+    Computes the internal volume of a single scan (from wall tops down to the visible surface).
+    For an empty truck, this is the total bed capacity.
+    For a loaded truck, this is the remaining empty space above the cargo.
     """
-    empty_pts = np.asarray(empty_pcd.points)
+    pts = np.asarray(pcd.points)
     
     # Grid setup
-    x_min, x_max = empty_pts[:, 0].min(), empty_pts[:, 0].max()
-    y_min, y_max = empty_pts[:, 1].min(), empty_pts[:, 1].max()
+    x_min, x_max = pts[:, 0].min(), pts[:, 0].max()
+    y_min, y_max = pts[:, 1].min(), pts[:, 1].max()
     res = config.HEIGHTMAP_GRID_RESOLUTION
     
     x_bins = np.arange(x_min, x_max + res, res)
@@ -18,31 +20,31 @@ def compute_empty_volume(empty_pcd):
     grid_shape = (len(x_bins), len(y_bins))
     
     import pandas as pd
-    empty_x_idx = np.digitize(empty_pts[:, 0], x_bins) - 1
-    empty_y_idx = np.digitize(empty_pts[:, 1], y_bins) - 1
+    x_idx = np.digitize(pts[:, 0], x_bins) - 1
+    y_idx = np.digitize(pts[:, 1], y_bins) - 1
     
-    df_empty = pd.DataFrame({'x': empty_x_idx, 'y': empty_y_idx, 'z': empty_pts[:, 2]})
-    e_max = df_empty.groupby(['x', 'y'])['z'].max()
+    df = pd.DataFrame({'x': x_idx, 'y': y_idx, 'z': pts[:, 2]})
+    z_max = df.groupby(['x', 'y'])['z'].max()
     
-    empty_floor_grid = np.full(grid_shape, np.nan)
-    for (xi, yi), zval in e_max.items():
+    floor_grid = np.full(grid_shape, np.nan)
+    for (xi, yi), zval in z_max.items():
         if 0 <= xi < grid_shape[0] and 0 <= yi < grid_shape[1]:
-            empty_floor_grid[xi, yi] = zval
+            floor_grid[xi, yi] = zval
             
-    wall_top_z = np.percentile(empty_pts[:, 2], 5)
+    wall_top_z = np.percentile(pts[:, 2], 5)
     
-    valid_empty = ~np.isnan(empty_floor_grid)
-    bed_depth = np.zeros(grid_shape)
-    bed_depth[valid_empty] = empty_floor_grid[valid_empty] - wall_top_z
+    valid_cells = ~np.isnan(floor_grid)
+    depth_grid = np.zeros(grid_shape)
+    depth_grid[valid_cells] = floor_grid[valid_cells] - wall_top_z
     
-    MIN_BED_DEPTH_CM = 10.0
-    interior_mask = bed_depth > MIN_BED_DEPTH_CM
+    MIN_DEPTH_CM = 10.0
+    interior_mask = depth_grid > MIN_DEPTH_CM
     
     cell_area = res * res
-    bed_capacity_cm3 = np.sum(bed_depth[interior_mask] * cell_area)
-    bed_capacity_m3  = bed_capacity_cm3 / 1e6
+    volume_cm3 = np.sum(depth_grid[interior_mask] * cell_area)
+    volume_m3  = volume_cm3 / 1e6
     
-    return bed_capacity_m3, wall_top_z, empty_floor_grid, grid_shape, x_bins, y_bins
+    return volume_m3, wall_top_z, floor_grid, grid_shape, x_bins, y_bins
 
 
 def compute_volume(empty_pcd, load_pcd):

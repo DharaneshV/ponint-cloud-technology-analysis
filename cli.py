@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description="Truck Point Cloud Processing Pipeline")
     
     # Input options
+    parser.add_argument("--input", type=str, help="Path to process a single scan (computes internal volume independently)")
     parser.add_argument("--empty", type=str, help="Path to raw empty truck point cloud (e.g. .xyz)")
     parser.add_argument("--load", type=str, help="Path to raw loaded truck point cloud (e.g. .xyz)")
     parser.add_argument("--reference", type=str, help="Path to pre-saved empty truck reference model (.pcd)")
@@ -36,6 +37,25 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     os.makedirs(debug_dir, exist_ok=True)
     
+    # Mode 0: Process a single standalone file independently
+    if args.input:
+        print(f"Mode: Processing single scan independently: {os.path.basename(args.input)}")
+        aligned, unrot = process_single_scan(args.input, "scan", debug_dir=debug_dir)
+        if unrot is not None:
+            from analysis.volume import compute_single_volume
+            vol_m3, _, _, _, _, _ = compute_single_volume(unrot)
+            
+            print(f"\n  +------------------------------------------+")
+            print(f"  |  Scanned Internal Volume : {vol_m3:8.4f} m3 |")
+            print(f"  +------------------------------------------+\n")
+            
+            import json
+            report_file = os.path.join(args.outdir, "single_report.json")
+            with open(report_file, 'w') as f:
+                json.dump({"internal_volume_m3": round(vol_m3, 4)}, f, indent=4)
+            print(f"Saved volume report to {report_file}")
+        return
+
     # Mode 1: Save reference only
     if args.empty and args.save_reference and not args.load:
         print("Mode: Generating and saving reference model.")
@@ -44,14 +64,13 @@ def main():
             save_reference_model(empty_unrot, args.save_reference)
             
             # Compute and report empty bed capacity
-            from analysis.volume import compute_empty_volume
-            bed_cap_m3, _, _, _, _, _ = compute_empty_volume(empty_unrot)
+            from analysis.volume import compute_single_volume
+            bed_cap_m3, _, _, _, _, _ = compute_single_volume(empty_unrot)
             
             print(f"\n  +------------------------------------------+")
             print(f"  |  Empty Truck Bed Capacity: {bed_cap_m3:8.4f} m3 |")
             print(f"  +------------------------------------------+\n")
             
-            # Save it to report
             import json
             report_file = os.path.join(args.outdir, "empty_report.json")
             with open(report_file, 'w') as f:
@@ -62,7 +81,7 @@ def main():
 
     # For processing a load, we need either --empty or --reference
     if not args.load:
-        parser.error("Must provide --load to run volume calculation.")
+        parser.error("Must provide --load (with --empty/--reference) OR --input for standalone processing.")
         
     empty_aligned = None
     empty_unrot = None
