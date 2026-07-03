@@ -16,32 +16,61 @@ import config
 def process_single_scan(filepath, name="scan", debug_dir="results/debug"):
     print(f"\n--- Processing {name} ---")
     
-    # 1. Read
-    pcd = io_utils.read_point_cloud(filepath)
-    visualize_stage.dump_stage(pcd, f"{name}_01_raw", output_dir=debug_dir)
+    # Dynamic scanner geometry configuration
+    basename = os.path.basename(filepath).upper()
+    is_sl2 = "SL2" in basename
+    try:
+        with open(filepath, 'r') as f:
+            first_line = f.readline()
+            while not first_line.strip() and first_line:
+                first_line = f.readline()
+            if "SRA" in first_line.upper():
+                is_sl2 = True
+    except:
+        pass
+        
+    orig_y_min = config.GANTRY_Y_MIN
+    orig_y_max = config.GANTRY_Y_MAX
+    orig_min_len = config.TRUCK_ENVELOPE_MIN_LENGTH
     
-    # 2. Noise Filter
-    pcd = noise_filter.remove_statistical_outliers(pcd)
-    visualize_stage.dump_stage(pcd, f"{name}_02_sor", output_dir=debug_dir)
-    
-    # 3. Gantry Filter
-    pcd = gantry_filter.filter_gantry(pcd)
-    visualize_stage.dump_stage(pcd, f"{name}_03_gantry_filtered", output_dir=debug_dir)
-    
-    # 4. Ground Plane Removal (Pass-through Z <= 330)
-    pcd = ground_plane_removal.remove_ground_plane(pcd)
-    visualize_stage.dump_stage(pcd, f"{name}_04_no_ground", output_dir=debug_dir)
-    
-    # 5. Downsample
-    pcd = downsample.downsample_point_cloud(pcd)
-    visualize_stage.dump_stage(pcd, f"{name}_05_downsampled", output_dir=debug_dir)
-    
-    # 6. Clustering
-    labels = clustering.cluster_points(pcd)
-    
-    # 7. Truck Extraction
-    truck_pcd = truck_extraction.extract_truck_cluster(pcd, labels)
-    
+    if is_sl2:
+        print("  [SL2 Geometry Detected] Adjusting gantry bounds and envelope length.")
+        config.GANTRY_Y_MIN = -450.0
+        config.GANTRY_Y_MAX = -180.0
+        config.TRUCK_ENVELOPE_MIN_LENGTH = 400.0
+        
+    try:
+        # 1. Read
+        pcd = io_utils.read_point_cloud(filepath)
+        visualize_stage.dump_stage(pcd, f"{name}_01_raw", output_dir=debug_dir)
+        
+        # 2. Noise Filter
+        pcd = noise_filter.remove_statistical_outliers(pcd)
+        visualize_stage.dump_stage(pcd, f"{name}_02_sor", output_dir=debug_dir)
+        
+        # 3. Gantry Filter
+        pcd = gantry_filter.filter_gantry(pcd)
+        visualize_stage.dump_stage(pcd, f"{name}_03_gantry_filtered", output_dir=debug_dir)
+        
+        # 4. Ground Plane Removal (Pass-through Z <= 330)
+        pcd = ground_plane_removal.remove_ground_plane(pcd)
+        visualize_stage.dump_stage(pcd, f"{name}_04_no_ground", output_dir=debug_dir)
+        
+        # 5. Downsample
+        pcd = downsample.downsample_point_cloud(pcd)
+        visualize_stage.dump_stage(pcd, f"{name}_05_downsampled", output_dir=debug_dir)
+        
+        # 6. Clustering
+        labels = clustering.cluster_points(pcd)
+        
+        # 7. Truck Extraction
+        truck_pcd = truck_extraction.extract_truck_cluster(pcd, labels)
+    finally:
+        # Guarantee restoration of global configuration
+        config.GANTRY_Y_MIN = orig_y_min
+        config.GANTRY_Y_MAX = orig_y_max
+        config.TRUCK_ENVELOPE_MIN_LENGTH = orig_min_len
+        
     if truck_pcd is None:
         print(f"Failed to extract truck for {name}.")
         return None, None
@@ -54,6 +83,10 @@ def process_single_scan(filepath, name="scan", debug_dir="results/debug"):
     pts_truck_shifted = pts_truck.copy()
     pts_truck_shifted[:, 0] -= x_min_val
     
+    # Center Y at 0.0 to match the volume grid boundaries
+    y_centroid = np.median(pts_truck_shifted[:, 1])
+    pts_truck_shifted[:, 1] -= y_centroid
+    
     truck_unrotated = o3d.geometry.PointCloud()
     truck_unrotated.points = o3d.utility.Vector3dVector(pts_truck_shifted)
     
@@ -63,7 +96,7 @@ def process_single_scan(filepath, name="scan", debug_dir="results/debug"):
     
     return truck_aligned, truck_unrotated
 
-def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir="results/runs", debug_dir="results/debug", ml_classify=False, ml_mode="reference_diff"):
+def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir="results/runs", debug_dir="results/debug", ml_classify=False, ml_mode="reference_diff", scanner_type="SL1"):
     if empty_aligned is None or load_aligned is None:
         print("Pipeline aborted due to extraction failure.")
         return None
@@ -78,8 +111,12 @@ def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot
     
     # ICP Registration for Volume (Scanner Frame preserving Z)
     print("\n--- ICP Registration (Volume Frame) ---")
-    load_unrot_aligned, transform_unrot = icp_registration.register_icp(load_unrot, empty_unrot)
-    visualize_stage.dump_stage(load_unrot_aligned, "load_08_unrot_icp_aligned", output_dir=debug_dir)
+    if scanner_type == "SL2":
+        print("  [SL2 Geometry Detected] Bypassing volume ICP registration to prevent cargo-to-floor warping.")
+        load_unrot_aligned = load_unrot
+    else:
+        load_unrot_aligned, transform_unrot = icp_registration.register_icp(load_unrot, empty_unrot)
+        visualize_stage.dump_stage(load_unrot_aligned, "load_08_unrot_icp_aligned", output_dir=debug_dir)
     
     # Dimensions (calculated on aligned PCA frame)
     print("\n--- Dimensions ---")
@@ -88,7 +125,16 @@ def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot
     
     # Volume (calculated on aligned unrotated scanner frame to preserve Z distance)
     print("\n--- Volume Calculation ---")
-    volume_report, empty_floor_grid, load_floor_grid = volume.compute_volume(empty_unrot, load_unrot_aligned)
+    orig_res = config.HEIGHTMAP_GRID_RESOLUTION
+    if scanner_type == "SL2":
+        # Adjust grid resolution to account for SL2 sparseness
+        config.HEIGHTMAP_GRID_RESOLUTION = 25.0
+        print("  [SL2 Sparseness Calibration] Adjusting grid resolution to 25.0 cm.")
+        
+    try:
+        volume_report, empty_floor_grid, load_floor_grid = volume.compute_volume(empty_unrot, load_unrot_aligned)
+    finally:
+        config.HEIGHTMAP_GRID_RESOLUTION = orig_res
     
     print(f"\nPipeline completed successfully!")
     
@@ -103,7 +149,7 @@ def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot
             import ml_model.infer
             
             if ml_mode == "independent":
-                class_pred, conf, ml_vol = ml_model.infer.get_independent_ml_prediction(load_unrot)
+                class_pred, conf, ml_vol = ml_model.infer.get_independent_ml_prediction(load_unrot, scanner_type=scanner_type)
             else:
                 # floor_z is the median level of the empty truck bed floor
                 floor_z = np.nanmedian(empty_floor_grid)

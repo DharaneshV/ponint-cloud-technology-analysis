@@ -77,25 +77,39 @@ def get_ml_prediction(surface_grid, floor_z, grid_resolution_cm=5.0):
     predicted_class = rf.classes_[class_idx]
     return predicted_class, confidence
 
-def get_independent_ml_prediction(pcd):
+# Global cache for loaded models
+_MODEL_CACHE = {}
+
+def get_independent_ml_prediction(pcd, scanner_type="SL1"):
     """
     Extracts the 6 independent scale-invariant shape and density features 
     from a single unaligned truck point cloud and runs the v3 classifier and regressor.
     Returns: (predicted_class, confidence, predicted_volume_m3)
     """
+    global _MODEL_CACHE
     base_dir = r"d:\point cloud technology\Truck-PointCloud\ml_model"
-    classifier_path = os.path.join(base_dir, "models", "fill_classifier_v3.pkl")
-    regressor_path = os.path.join(base_dir, "models", "fill_regressor_v3.pkl")
-    scaler_path = os.path.join(base_dir, "models", "fill_scaler_v3.pkl")
+    model_name = f"fill_model_{scanner_type.lower()}.pkl"
+    model_path = os.path.join(base_dir, "models", model_name)
     
     import joblib
     
-    if not os.path.exists(classifier_path) or not os.path.exists(scaler_path) or not os.path.exists(regressor_path):
-        return "MODEL NOT FOUND", 0.0, 0.0
-        
-    rf_clf = joblib.load(classifier_path)
-    rf_reg = joblib.load(regressor_path)
-    scaler = joblib.load(scaler_path)
+    # Check cache first
+    if model_path in _MODEL_CACHE:
+        model_package = _MODEL_CACHE[model_path]
+    else:
+        if not os.path.exists(model_path):
+            return "MODEL NOT FOUND", 0.0, 0.0
+        try:
+            model_package = joblib.load(model_path)
+            _MODEL_CACHE[model_path] = model_package
+        except Exception as e:
+            print(f"Error loading model {model_name}: {e}")
+            return "MODEL LOADING ERROR", 0.0, 0.0
+            
+    rf_clf = model_package["classifier"]
+    rf_reg = model_package["regressor"]
+    scaler = model_package["scaler"]
+    feature_names = model_package["metadata"]["features"]
         
     points = np.asarray(pcd.points)
     if len(points) < 100:
@@ -118,25 +132,33 @@ def get_independent_ml_prediction(pcd):
     vol_cm3 = extent[0] * extent[1] * extent[2]
     density = len(points) / vol_cm3 if vol_cm3 > 0 else 0
     
-    features = pd.DataFrame([{
+    # Build feature dict matching training metadata order
+    feature_dict = {
         'mean_z': mean_z,
         'median_z': median_z,
         'std_z': std_z,
         'skew_z': skew_z,
         'coverage_proxy': coverage_proxy,
         'point_density': density
-    }])
+    }
     
-    # The scaler for v3 was fitted on an array of 6 features
+    features = pd.DataFrame([[feature_dict[name] for name in feature_names]], columns=feature_names)
+    
     X_scaled = scaler.transform(features.values)
     
     probs = rf_clf.predict_proba(X_scaled)[0]
     class_idx = np.argmax(probs)
     confidence = probs[class_idx]
     
-    pred_vol = rf_reg.predict(X_scaled)[0]
+    predicted_class = rf_clf.classes_[class_idx]
+    
+    # Two-Stage Logic: Force volume to 0.0 if Empty
+    if predicted_class == 'Empty':
+        pred_vol = 0.0
+    else:
+        pred_vol = rf_reg.predict(X_scaled)[0]
     
     if confidence < 0.70:
         return "UNCERTAIN - recommend manual review", confidence, pred_vol
         
-    return rf_clf.classes_[class_idx], confidence, pred_vol
+    return predicted_class, confidence, pred_vol

@@ -18,15 +18,15 @@ def read_point_cloud(filepath):
         pcd = o3d.io.read_point_cloud(filepath)
         return pcd
     
-    # Detect SL1 telegram file: starts with "SL1" in filename or ends in _RD.txt with SL1 prefix
-    is_sl1 = basename.upper().startswith('SL1') and filepath.endswith('.txt')
+    # Detect SL telegram file: starts with "SL1" or "SL2" in filename and ends in .txt
+    is_sl = (basename.upper().startswith('SL1') or basename.upper().startswith('SL2')) and filepath.endswith('.txt')
     
-    if is_sl1:
+    if is_sl:
         return _read_sl1_file(filepath)
     elif filepath.endswith('.xyz'):
         return _read_xyz_file(filepath)
     else:
-        raise ValueError(f"Unsupported file format for '{basename}'. Use .xyz, .pcd, or SL1 telegram .txt")
+        raise ValueError(f"Unsupported file format for '{basename}'. Use .xyz, .pcd, or SL1/SL2 telegram .txt")
 
 
 def _read_sl1_file(filepath):

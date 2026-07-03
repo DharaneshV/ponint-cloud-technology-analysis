@@ -9,6 +9,25 @@ import config
 from run_pipeline import process_single_scan, run_pipeline_comparison
 from analysis.reference_manager import save_reference_model, load_reference_model
 
+def detect_scanner_type(filepath):
+    if not filepath:
+        return "SL1"
+    basename = os.path.basename(filepath).upper()
+    if "SL2" in basename:
+        return "SL2"
+    if "SL1" in basename:
+        return "SL1"
+    try:
+        with open(filepath, 'r') as f:
+            first_line = f.readline()
+            while not first_line.strip() and first_line:
+                first_line = f.readline()
+            if "SRA" in first_line.upper():
+                return "SL2"
+    except:
+        pass
+    return "SL1"
+
 def main():
     parser = argparse.ArgumentParser(description="Truck Point Cloud Processing Pipeline")
     
@@ -22,8 +41,8 @@ def main():
     parser.add_argument("--save-reference", type=str, help="Path to save the processed empty scan as a reference model (.pcd)")
     
     # Configuration options
-    parser.add_argument("--length", type=float, help="Known physical length of the truck in cm", default=None)
-    parser.add_argument("--outdir", type=str, help="Directory to save output reports", default="results/runs")
+    parser.add_argument("--length", type=float, help="Override default truck reference length (in cm)", default=None)
+    parser.add_argument("--outdir", type=str, help="Output directory for reports", default="results/runs")
     parser.add_argument("--debugdir", type=str, help="Directory to save intermediate debug PCDs", default=None)
     parser.add_argument("--ml-classify", action="store_true", help="Run the fast ML model to classify the fill state")
     parser.add_argument("--mode", type=str, choices=["reference_diff", "independent"], default="reference_diff", help="ML classification mode. Use 'independent' for the reference-free v3 model.")
@@ -42,12 +61,13 @@ def main():
     
     # Mode 0: Process a single standalone file independently
     if args.input:
-        print(f"Mode: Processing single scan independently: {os.path.basename(args.input)}")
+        scanner_type = detect_scanner_type(args.input)
+        print(f"Mode: Processing single scan independently: {os.path.basename(args.input)} (Scanner: {scanner_type})")
         aligned, unrot = process_single_scan(args.input, "scan", debug_dir=debug_dir)
         if unrot is not None:
             if args.ml_only:
                 import ml_model.infer
-                pred, conf, vol_m3 = ml_model.infer.get_independent_ml_prediction(unrot)
+                pred, conf, vol_m3 = ml_model.infer.get_independent_ml_prediction(unrot, scanner_type=scanner_type)
                 print(f"\n  +------------------------------------------+")
                 print(f"  |  ML Fill State (v3)      : {pred:8} ({conf:.2%}) |")
                 print(f"  |  ML Volume (EXPERIMENTAL): {vol_m3:8.4f} m3 |")
@@ -57,7 +77,8 @@ def main():
                     "ml_prediction": pred,
                     "ml_confidence": conf,
                     "ml_volume_m3": round(vol_m3, 4),
-                    "mode": "ml_only_experimental"
+                    "mode": "ml_only_experimental",
+                    "scanner_type": scanner_type
                 }
             else:
                 from analysis.volume import compute_single_volume
@@ -69,12 +90,13 @@ def main():
                 
                 if args.ml_classify and args.mode == "independent":
                     import ml_model.infer
-                    pred, conf, ml_vol = ml_model.infer.get_independent_ml_prediction(unrot)
+                    pred, conf, ml_vol = ml_model.infer.get_independent_ml_prediction(unrot, scanner_type=scanner_type)
                     print(f"  |  ML Fill State (v3)      : {pred:8} ({conf:.2%}) |")
                     print(f"  +------------------------------------------+\n")
                     result_data["ml_prediction"] = pred
                     result_data["ml_confidence"] = conf
                     result_data["mode"] = "independent"
+                    result_data["scanner_type"] = scanner_type
                 else:
                     print(f"  +------------------------------------------+\n")
                 
@@ -143,7 +165,8 @@ def main():
         sys.exit(1)
         
     # Run the comparison pipeline
-    run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir=args.outdir, debug_dir=debug_dir, ml_classify=args.ml_classify, ml_mode=args.mode)
+    scanner_type = detect_scanner_type(args.load)
+    run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir=args.outdir, debug_dir=debug_dir, ml_classify=args.ml_classify, ml_mode=args.mode, scanner_type=scanner_type)
 
 if __name__ == "__main__":
     main()
