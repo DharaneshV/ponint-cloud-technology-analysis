@@ -31,6 +31,11 @@ def get_ml_prediction(surface_grid, floor_z, grid_resolution_cm=5.0):
         
     max_heap_height = np.max(cargo_heights)
     mean_bed_height = np.mean(cargo_heights)
+    
+    # Fast geometric check: if mean cargo height is under 10cm, it is Empty
+    if mean_bed_height < 10.0:
+        return "Empty", 1.0
+        
     height_variance = np.var(cargo_heights)
     
     covered_cells = np.sum(cargo_heights > 10.0) # >10cm
