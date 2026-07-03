@@ -160,6 +160,9 @@ def main():
     empty_dir = r"d:\point cloud technology\bgtest-3\empty"
     load_dir = r"d:\point cloud technology\bgtest-3\load"
     dest_file = r"d:\point cloud technology\Truck-PointCloud\ml_model\sick_validation_dataset.csv"
+    val_out_dir = r"d:\point cloud technology\Truck-PointCloud\results\validation"
+    
+    os.makedirs(val_out_dir, exist_ok=True)
     
     empty_files = sorted(glob.glob(os.path.join(empty_dir, "SL1*_RD.txt")))
     load_files = sorted(glob.glob(os.path.join(load_dir, "SL1*_RD.txt")))
@@ -170,6 +173,7 @@ def main():
         
     # Build Master Empty Composite
     composite_empty = process_empty_composite(empty_files)
+    o3d.io.write_point_cloud(os.path.join(val_out_dir, "composite_empty.pcd"), composite_empty)
     
     dataset_records = []
     
@@ -186,6 +190,11 @@ def main():
             
         # Align empty scan to the composite empty reference
         aligned_empty, _ = icp_registration.register_icp(empty_truck, composite_empty)
+        
+        # Save segmented and aligned empty truck clouds
+        base_name = filename.split('.')[0]
+        o3d.io.write_point_cloud(os.path.join(val_out_dir, f"{base_name}_segmented.pcd"), empty_truck)
+        o3d.io.write_point_cloud(os.path.join(val_out_dir, f"{base_name}_aligned.pcd"), aligned_empty)
         
         # Height map differencing (representing scan noise/alignment jitter)
         cargo_heightmap, empty_floor_grid, _ = compute_grid_heights(composite_empty, aligned_empty)
@@ -215,6 +224,11 @@ def main():
             
         # Align load scan to the composite empty reference
         aligned_load, _ = icp_registration.register_icp(load_truck, composite_empty)
+        
+        # Save segmented and aligned load truck clouds
+        base_name = filename.split('.')[0]
+        o3d.io.write_point_cloud(os.path.join(val_out_dir, f"{base_name}_segmented.pcd"), load_truck)
+        o3d.io.write_point_cloud(os.path.join(val_out_dir, f"{base_name}_aligned.pcd"), aligned_load)
         
         # Height map differencing
         cargo_heightmap, empty_floor_grid, _ = compute_grid_heights(composite_empty, aligned_load)
