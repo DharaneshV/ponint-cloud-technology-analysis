@@ -26,6 +26,8 @@ def main():
     parser.add_argument("--outdir", type=str, help="Directory to save output reports", default="results/runs")
     parser.add_argument("--debugdir", type=str, help="Directory to save intermediate debug PCDs", default=None)
     parser.add_argument("--ml-classify", action="store_true", help="Run the fast ML model to classify the fill state")
+    parser.add_argument("--mode", type=str, choices=["reference_diff", "independent"], default="reference_diff", help="ML classification mode. Use 'independent' for the reference-free v3 model.")
+    parser.add_argument("--ml-only", action="store_true", help="Run fully independent ML inference (classifier + regressor) bypassing geometric volume.")
     
     args = parser.parse_args()
     
@@ -43,17 +45,43 @@ def main():
         print(f"Mode: Processing single scan independently: {os.path.basename(args.input)}")
         aligned, unrot = process_single_scan(args.input, "scan", debug_dir=debug_dir)
         if unrot is not None:
-            from analysis.volume import compute_single_volume
-            vol_m3, _, _, _, _, _ = compute_single_volume(unrot)
-            
-            print(f"\n  +------------------------------------------+")
-            print(f"  |  Scanned Internal Volume : {vol_m3:8.4f} m3 |")
-            print(f"  +------------------------------------------+\n")
-            
+            if args.ml_only:
+                import ml_model.infer
+                pred, conf, vol_m3 = ml_model.infer.get_independent_ml_prediction(unrot)
+                print(f"\n  +------------------------------------------+")
+                print(f"  |  ML Fill State (v3)      : {pred:8} ({conf:.2%}) |")
+                print(f"  |  ML Volume (EXPERIMENTAL): {vol_m3:8.4f} m3 |")
+                print(f"  +------------------------------------------+\n")
+                
+                result_data = {
+                    "ml_prediction": pred,
+                    "ml_confidence": conf,
+                    "ml_volume_m3": round(vol_m3, 4),
+                    "mode": "ml_only_experimental"
+                }
+            else:
+                from analysis.volume import compute_single_volume
+                vol_m3, _, _, _, _, _ = compute_single_volume(unrot)
+                
+                print(f"\n  +------------------------------------------+")
+                print(f"  |  Scanned Internal Volume : {vol_m3:8.4f} m3 |")
+                result_data = {"internal_volume_m3": round(vol_m3, 4)}
+                
+                if args.ml_classify and args.mode == "independent":
+                    import ml_model.infer
+                    pred, conf, ml_vol = ml_model.infer.get_independent_ml_prediction(unrot)
+                    print(f"  |  ML Fill State (v3)      : {pred:8} ({conf:.2%}) |")
+                    print(f"  +------------------------------------------+\n")
+                    result_data["ml_prediction"] = pred
+                    result_data["ml_confidence"] = conf
+                    result_data["mode"] = "independent"
+                else:
+                    print(f"  +------------------------------------------+\n")
+                
             import json
             report_file = os.path.join(args.outdir, "single_report.json")
             with open(report_file, 'w') as f:
-                json.dump({"internal_volume_m3": round(vol_m3, 4)}, f, indent=4)
+                json.dump(result_data, f, indent=4)
             print(f"Saved volume report to {report_file}")
         return
 
@@ -115,7 +143,7 @@ def main():
         sys.exit(1)
         
     # Run the comparison pipeline
-    run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir=args.outdir, debug_dir=debug_dir, ml_classify=args.ml_classify)
+    run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir=args.outdir, debug_dir=debug_dir, ml_classify=args.ml_classify, ml_mode=args.mode)
 
 if __name__ == "__main__":
     main()

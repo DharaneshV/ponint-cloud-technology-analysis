@@ -76,3 +76,67 @@ def get_ml_prediction(surface_grid, floor_z, grid_resolution_cm=5.0):
         
     predicted_class = rf.classes_[class_idx]
     return predicted_class, confidence
+
+def get_independent_ml_prediction(pcd):
+    """
+    Extracts the 6 independent scale-invariant shape and density features 
+    from a single unaligned truck point cloud and runs the v3 classifier and regressor.
+    Returns: (predicted_class, confidence, predicted_volume_m3)
+    """
+    base_dir = r"d:\point cloud technology\Truck-PointCloud\ml_model"
+    classifier_path = os.path.join(base_dir, "models", "fill_classifier_v3.pkl")
+    regressor_path = os.path.join(base_dir, "models", "fill_regressor_v3.pkl")
+    scaler_path = os.path.join(base_dir, "models", "fill_scaler_v3.pkl")
+    
+    import joblib
+    
+    if not os.path.exists(classifier_path) or not os.path.exists(scaler_path) or not os.path.exists(regressor_path):
+        return "MODEL NOT FOUND", 0.0, 0.0
+        
+    rf_clf = joblib.load(classifier_path)
+    rf_reg = joblib.load(regressor_path)
+    scaler = joblib.load(scaler_path)
+        
+    points = np.asarray(pcd.points)
+    if len(points) < 100:
+        return "UNCERTAIN - Sparse", 0.0, 0.0
+        
+    z_coords = points[:, 2]
+    floor_z = np.percentile(z_coords, 95)
+    
+    mean_z = np.mean(z_coords)
+    median_z = np.median(z_coords)
+    std_z = np.std(z_coords)
+    skew_z = skew(z_coords)
+    
+    cargo_points = np.sum(z_coords < (floor_z - 10.0))  # > 10cm above floor (Z points down)
+    coverage_proxy = cargo_points / len(points)
+    
+    import open3d as o3d
+    aabb = pcd.get_axis_aligned_bounding_box()
+    extent = aabb.get_extent()
+    vol_cm3 = extent[0] * extent[1] * extent[2]
+    density = len(points) / vol_cm3 if vol_cm3 > 0 else 0
+    
+    features = pd.DataFrame([{
+        'mean_z': mean_z,
+        'median_z': median_z,
+        'std_z': std_z,
+        'skew_z': skew_z,
+        'coverage_proxy': coverage_proxy,
+        'point_density': density
+    }])
+    
+    # The scaler for v3 was fitted on an array of 6 features
+    X_scaled = scaler.transform(features.values)
+    
+    probs = rf_clf.predict_proba(X_scaled)[0]
+    class_idx = np.argmax(probs)
+    confidence = probs[class_idx]
+    
+    pred_vol = rf_reg.predict(X_scaled)[0]
+    
+    if confidence < 0.70:
+        return "UNCERTAIN - recommend manual review", confidence, pred_vol
+        
+    return rf_clf.classes_[class_idx], confidence, pred_vol

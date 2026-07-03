@@ -63,7 +63,7 @@ def process_single_scan(filepath, name="scan", debug_dir="results/debug"):
     
     return truck_aligned, truck_unrotated
 
-def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir="results/runs", debug_dir="results/debug", ml_classify=False):
+def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir="results/runs", debug_dir="results/debug", ml_classify=False, ml_mode="reference_diff"):
     if empty_aligned is None or load_aligned is None:
         print("Pipeline aborted due to extraction failure.")
         return None
@@ -98,18 +98,23 @@ def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot
     }
     
     if ml_classify:
-        print("\n--- ML Classification ---")
+        print(f"\n--- ML Classification (Mode: {ml_mode}) ---")
         try:
             import ml_model.infer
             
-            # floor_z is the median level of the empty truck bed floor
-            floor_z = np.nanmedian(empty_floor_grid)
+            if ml_mode == "independent":
+                class_pred, conf, ml_vol = ml_model.infer.get_independent_ml_prediction(load_unrot)
+            else:
+                # floor_z is the median level of the empty truck bed floor
+                floor_z = np.nanmedian(empty_floor_grid)
+                class_pred, conf = ml_model.infer.get_ml_prediction(load_floor_grid, floor_z)
             
-            class_pred, conf = ml_model.infer.get_ml_prediction(load_floor_grid, floor_z)
-            
-            print(f"Fill estimate (Random Forest model v2): {class_pred} (confidence {conf:.2%})")
+            print(f"Fill estimate: {class_pred} (confidence {conf:.2%})")
             results["ml_prediction"] = class_pred
             results["ml_confidence"] = conf
+            results["mode"] = ml_mode
+            if ml_mode == "independent":
+                results["ml_volume_m3"] = round(ml_vol, 4)
         except Exception as e:
             print(f"ML Classification failed: {e}")
             
