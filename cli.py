@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--length", type=float, help="Known physical length of the truck in cm", default=None)
     parser.add_argument("--outdir", type=str, help="Directory to save output reports", default="results/runs")
     parser.add_argument("--debugdir", type=str, help="Directory to save intermediate debug PCDs", default=None)
+    parser.add_argument("--ml-classify", action="store_true", help="Run the fast ML model to classify the fill state")
     
     args = parser.parse_args()
     
@@ -114,7 +115,7 @@ def main():
         sys.exit(1)
         
     # Run the comparison pipeline
-    run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir=args.outdir, debug_dir=debug_dir)
+    run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir=args.outdir, debug_dir=debug_dir, ml_classify=args.ml_classify)
 
 if __name__ == "__main__":
     main()

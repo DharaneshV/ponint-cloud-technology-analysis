@@ -57,7 +57,7 @@ def compute_volume(empty_pcd, load_pcd):
     print(f"Computing volume (grid resolution = {config.HEIGHTMAP_GRID_RESOLUTION} cm)...")
 
     # 1. Get empty capacity and grid
-    bed_capacity_m3, wall_top_z, empty_floor_grid, grid_shape, x_bins, y_bins = compute_empty_volume(empty_pcd)
+    bed_capacity_m3, wall_top_z, empty_floor_grid, grid_shape, x_bins, y_bins = compute_single_volume(empty_pcd)
     print(f"  Wall-top reference Z (5th pct): {wall_top_z:.2f} cm")
 
     # 2. Process load scan
@@ -121,5 +121,5 @@ def compute_volume(empty_pcd, load_pcd):
         "grid_resolution_cm":  res
     }
 
-    return volume_report
+    return volume_report, empty_floor_grid, load_floor_grid
 

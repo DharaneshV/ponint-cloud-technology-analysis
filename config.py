@@ -50,3 +50,7 @@ TRUCK_ENVELOPE_MAX_HEIGHT = 300.0   # 3.0 meters
 # --- Analysis Configuration ---
 HEIGHTMAP_GRID_RESOLUTION = 5.0 # 5 cm grid resolution
 
+# --- Scanner Constants ---
+SKY_CODE_THRESHOLD = 50000.0 # Raw Z values above this are sky/error misses
+
+

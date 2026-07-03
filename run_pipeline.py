@@ -63,7 +63,7 @@ def process_single_scan(filepath, name="scan", debug_dir="results/debug"):
     
     return truck_aligned, truck_unrotated
 
-def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir="results/runs", debug_dir="results/debug"):
+def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot, output_dir="results/runs", debug_dir="results/debug", ml_classify=False):
     if empty_aligned is None or load_aligned is None:
         print("Pipeline aborted due to extraction failure.")
         return None
@@ -88,7 +88,7 @@ def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot
     
     # Volume (calculated on aligned unrotated scanner frame to preserve Z distance)
     print("\n--- Volume Calculation ---")
-    volume_report = volume.compute_volume(empty_unrot, load_unrot_aligned)
+    volume_report, empty_floor_grid, load_floor_grid = volume.compute_volume(empty_unrot, load_unrot_aligned)
     
     print(f"\nPipeline completed successfully!")
     
@@ -97,6 +97,22 @@ def run_pipeline_comparison(empty_aligned, empty_unrot, load_aligned, load_unrot
         "volume": volume_report
     }
     
+    if ml_classify:
+        print("\n--- ML Classification ---")
+        try:
+            import ml_model.infer
+            
+            # floor_z is the median level of the empty truck bed floor
+            floor_z = np.nanmedian(empty_floor_grid)
+            
+            class_pred, conf = ml_model.infer.get_ml_prediction(load_floor_grid, floor_z)
+            
+            print(f"Fill estimate (Random Forest model v2): {class_pred} (confidence {conf:.2%})")
+            results["ml_prediction"] = class_pred
+            results["ml_confidence"] = conf
+        except Exception as e:
+            print(f"ML Classification failed: {e}")
+            
     # Save a combined report
     import json
     report_file = os.path.join(output_dir, "report.json")

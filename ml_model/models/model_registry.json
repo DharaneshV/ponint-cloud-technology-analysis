@@ -1,0 +1,51 @@
+{
+    "v1": {
+        "training_date": "2026-07-02T20:46:11.019373",
+        "train_samples": 7041,
+        "test_samples": 1265,
+        "features": [
+            "max_heap_height",
+            "mean_bed_height",
+            "height_variance",
+            "coverage_ratio",
+            "height_skewness"
+        ],
+        "classes": [
+            "Full",
+            "Partial"
+        ],
+        "macro_f1": 0.9795967741935483,
+        "description": "Fast geometric rule approximation model (Track A)."
+    },
+    "v2": {
+        "training_date": "2026-07-03T11:12:09.153040",
+        "train_samples": 6645,
+        "test_samples": 1661,
+        "features": [
+            "max_heap_height",
+            "mean_bed_height",
+            "height_variance",
+            "coverage_ratio",
+            "height_skewness"
+        ],
+        "classes": [
+            "Full",
+            "Partial"
+        ],
+        "macro_f1": 0.9872434089666317,
+        "best_params": {
+            "class_weight": null,
+            "max_depth": 15,
+            "min_samples_leaf": 1,
+            "n_estimators": 300
+        },
+        "feature_importances": {
+            "max_heap_height": 0.33174424247181905,
+            "mean_bed_height": 0.439745009094286,
+            "height_variance": 0.1199833306250593,
+            "coverage_ratio": 0.02503601041635212,
+            "height_skewness": 0.08349140739248363
+        },
+        "description": "Tuned Random Forest classifier with corrected ground Z and sky codes (v2)."
+    }
+}
